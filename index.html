@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>QC快篩 · 砂布背印</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
+<script type="module">
+  import * as Paddle from "https://cdn.jsdelivr.net/npm/esearch-ocr@5.1.5/dist/esearch-ocr.js";
+  window.Paddle = Paddle;
+  window.__paddleModuleReady = true;
+</script>
+<style>
+  :root{
+    --bg:#12161c; --panel:#1b222c; --panel2:#232c38; --line:#31404f;
+    --ink:#eef3f8; --dim:#8 da; --dim:#8fa3b6; --accent:#ffb020; --accent2:#3aa0ff;
+    --danger:#ff3b30; --ok:#28c76f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"PingFang TC","Helvetica Neue",sans-serif}
+  body{max-width:640px;margin:0 auto;padding:16px 14px 40px}
+  h1{font-size:20px;margin:2px 0 2px;letter-spacing:1px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin-bottom:14px}
+  label{display:block;font-size:14px;color:var(--dim);margin:10px 0 5px}
+  input[type=text]{width:100%;font-size:20px;padding:13px 12px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--ink);letter-spacing:1px}
+  input[type=text]:focus{outline:none;border-color:var(--accent2)}
+  .hint{font-size:12px;color:var(--dim);margin-top:5px;line-height:1.5}
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    font-size:19px;font-weight:600;padding:16px;border-radius:12px;border:none;
+    margin-top:12px;cursor:pointer;color:#fff}
+  .btn.cam{background:var(--accent2)} .btn.lib{background:var(--panel2);border:1px solid var(--line)}
+  .btn.big{background:var(--accent);color:#20160a;font-size:20px}
+  .btn:active{filter:brightness(.9)}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);font-size:16px;padding:13px}
+  .row{display:flex;gap:10px} .row .btn{margin-top:12px}
+  #stage{display:none} #resultStage{display:none}
+  canvas{width:100%;border-radius:12px;border:1px solid var(--line);display:block;background:#000}
+  .prog{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:14px}
+  .prog>i{display:block;height:100%;width:0;background:var(--accent2);transition:width .2s}
+  .verdict{font-size:22px;font-weight:700;padding:14px 16px;border-radius:12px;margin:0 0 12px;line-height:1.35}
+  .verdict.bad{background:rgba(255,59,48,.13);border:1px solid var(--danger);color:#ff8f88}
+  .verdict.warn{background:rgba(255,176,32,.13);border:1px solid var(--accent);color:#ffcd6b}
+  .verdict.ok{background:rgba(40,199,111,.13);border:1px solid var(--ok);color:#7fe0a8}
+  .item{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--danger);
+    border-radius:9px;padding:11px 12px;margin-bottom:9px;font-size:15px;line-height:1.5}
+  .item .no{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+    background:var(--danger);color:#fff;border-radius:50%;font-size:14px;font-weight:700;margin-right:8px}
+  .item.note{border-left-color:var(--dim)}
+  .item .pos{color:var(--accent);font-weight:600}
+  .foot{color:var(--dim);font-size:12px;text-align:center;margin-top:8px;line-height:1.6}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;
+    justify-content:center;padding:24px;z-index:50}
+  .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:400px}
+  .modal h3{margin:0 0 8px;font-size:18px} .modal p{color:var(--dim);font-size:15px;line-height:1.6;margin:0 0 18px}
+  .modal .mono{color:var(--accent);font-weight:700;font-size:17px}
+  .tag{display:inline-block;font-size:12px;padding:2px 9px;border-radius:20px;background:var(--panel2);
+    border:1px solid var(--line);color:var(--dim);margin-left:8px}
+</style>
+</head>
+<body>
+<h1>QC快篩 · 砂布背印</h1>
+<div class="sub">本地運算，照片不離開手機 · 快篩結果，正式放行請走完整覆核</div>
+
+<!-- 輸入頁 -->
+<div id="inputStage">
+  <div class="card">
+    <label>品名 Product</label>
+    <input type="text" id="product" placeholder="例：C303" autocapitalize="characters">
+    <label>粒號 Grit</label>
+    <input type="text" id="grit" placeholder="例：P-240" autocapitalize="characters">
+    <label>批號 Batch（留空＝自我比對模式）</label>
+    <input type="text" id="batch" placeholder="例：Q 07 0I" autocapitalize="characters">
+    <div class="hint">注意易混字：大寫 I 不是數字 1、字母 O 不是數字 0。有無空格皆可比對。</div>
+  </div>
+  <button class="btn cam" id="camBtn">📷 拍照檢查</button>
+  <button class="btn lib" id="libBtn">🖼 從相簿選圖</button>
+  <input type="file" id="file" accept="image/*" capture="environment" hidden>
+  <input type="file" id="fileLib" accept="image/*" hidden>
+</div>
+
+<!-- 掃描中 -->
+<div id="stage">
+  <div class="card">
+    <div id="progText" style="font-size:16px">準備中…</div>
+    <div class="prog"><i id="progBar"></i></div>
+  </div>
+</div>
+
+<!-- 結果頁 -->
+<div id="resultStage">
+  <div id="verdict" class="verdict"></div>
+  <canvas id="cv"></canvas>
+  <div id="items" style="margin-top:14px"></div>
+  <div class="row">
+    <button class="btn big" id="saveBtn" style="flex:1">💾 儲存標記圖</button>
+    <button class="btn ghost" id="copyBtn" style="flex:1">📋 複製報告</button>
+  </div>
+  <button class="btn ghost" id="againBtn">↩ 檢查下一張</button>
+  <button class="btn ghost" id="dbgBtn" style="border-color:#3aa0ff;color:#8fc4ff">🐞 匯出除錯檔（給開發者修準確度）</button>
+  <div class="foot">快篩僅供初判 · 批號末碼字形（I/1、O/0）如有疑慮請人眼放大確認</div>
+</div>
+
+<!-- 自我比對確認彈窗 -->
+<div class="modal" id="confirmModal">
+  <div class="box">
+    <h3>確認本批正確規格</h3>
+    <p>偵測到多數樣態：<br><span class="mono" id="detectedSpec"></span><br><br>這是本批的正確規格嗎？</p>
+    <button class="btn big" id="specOk">✔ 正確，依此判定</button>
+    <button class="btn ghost" id="specNo" style="margin-top:10px">✘ 有誤，我重新輸入規格</button>
+  </div>
+</div>
+
+<script>
+/* ========== 字形混淆等價類（移植自 qc_check.py，參數不得更改） ========== */
+const CLS={};
+const addcls=(s,v)=>{for(const c of s)CLS[c]=v;};
+addcls("0OoQqDUu()",'0'); addcls("1IilL|!Tr]}",'1'); addcls("Jjd",'J'); addcls("5Ss$",'5');
+addcls("8B&",'8'); addcls("2Zz",'2'); addcls("4A",'4'); addcls("9g",'9');
+addcls("3E",'3'); addcls("7",'7'); addcls("6Gb",'6'); addcls("C€¢©£ce«(",'C');
+addcls("Pp",'P'); CLS['&']='0'; CLS['@']='0';
+const WILD="%*?#'’‘\"`.,:;-_=~";
+const isSpace=c=>/\s/.test(c);
+function norm(s){let o='';for(const ch of s){
+  if(WILD.includes(ch)||isSpace(ch))o+='?';
+  else o+=(CLS[ch]||CLS[ch.toUpperCase()]||ch.toUpperCase());}return o;}
+function _eq(a,b){if(a.length!==b.length)return false;
+  for(let i=0;i<a.length;i++){const x=a[i],y=b[i];if(!(x===y||x==='?'||y==='?'))return false;}return true;}
+function clsMatch(found,expect){
+  const f=norm(found),e=norm(expect);
+  if(Math.abs(f.length-e.length)>1)return false;
+  if(f.length!==e.length){
+    const[sh,lo]=f.length<e.length?[f,e]:[e,f];
+    for(let k=0;k<lo.length;k++)if(_eq(lo.slice(0,k)+lo.slice(k+1),sh))return true;
+    return false;}
+  return _eq(f,e);}
+function diff(f,t){if(f.length!==t.length)return 99;let d=0;
+  for(let i=0;i<f.length;i++){const a=f[i],b=t[i];if(a!==b&&a!=='?'&&b!=='?')d++;}return d;}
+function adjTransposed(f,m){if(f.length!==m.length||f===m)return false;
+  for(let i=0;i<m.length-1;i++){
+    const sw=m.slice(0,i)+m[i+1]+m[i]+m.slice(i+2);if(sw===f)return true;}return false;}
+function sub1(f,m){return f.length===m.length&&diff(f,m)===1;}
+
+/* ========== 影像處理 ========== */
+const MAXDIM=3000;
+async function loadOriented(file){
+  const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
+  let{width:w,height:h}=bmp;
+  const origLong=Math.max(w,h);
+  const s=Math.min(1,MAXDIM/Math.max(w,h));
+  w=Math.round(w*s);h=Math.round(h*s);
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  c.getContext('2d').drawImage(bmp,0,0,w,h);
+  c.__origLong=origLong;
+  return c;
+}
+function toGrayCanvas(src){
+  const c=document.createElement('canvas');c.width=src.width;c.height=src.height;
+  const ctx=c.getContext('2d');ctx.drawImage(src,0,0);
+  const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+  // 灰階 + autocontrast
+  let mn=255,mx=0;
+  for(let i=0;i<d.length;i+=4){const g=(d[i]*.3+d[i+1]*.59+d[i+2]*.11)|0;d[i]=d[i+1]=d[i+2]=g;
+    if(g<mn)mn=g;if(g>mx)mx=g;}
+  const rng=Math.max(1,mx-mn);
+  for(let i=0;i<d.length;i+=4){const v=((d[i]-mn)*255/rng)|0;d[i]=d[i+1]=d[i+2]=v;}
+  ctx.putImageData(im,0,0);return c;
+}
+
+/* ========== OCR (PaddleOCR via esearch-ocr + onnxruntime-web) ========== */
+let __paddleReady=false;
+const MODEL_BASE='https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/';
+async function waitFor(cond,ms=30000){const t0=Date.now();
+  while(!cond()){if(Date.now()-t0>ms)throw new Error('載入逾時');await new Promise(r=>setTimeout(r,120));}}
+async function initPaddle(onProg){
+  if(__paddleReady)return;
+  onProg&&onProg(0,'載入辨識引擎…');
+  window.__ocrStage='載入OCR模組';await waitFor(()=>window.__paddleModuleReady&&window.Paddle);       // esearch 模組
+  window.__ocrStage='載入OpenCV';await waitFor(()=>window.cv&&window.cv.Mat);                        // opencv.js
+  window.__ocrStage='載入ONNX';await waitFor(()=>window.ort);                                      // onnxruntime-web
+  onProg&&onProg(.3,'下載模型檔（首次較久）…');
+  window.__ocrStage='下載模型';const dic=await (await fetch(MODEL_BASE+'ppocr_keys_v1.txt')).text();
+  await window.Paddle.init({
+    detPath:MODEL_BASE+'ppocr_det.onnx',
+    recPath:MODEL_BASE+'ppocr_rec.onnx',
+    dic, ort:window.ort, node:false, cv:window.cv,
+    // 密集小字場景: 降低偵測門檻讓更多字框被抓到
+    detConfig:{}, recConfig:{}
+  });
+  window.__ocrStage='引擎就緒';__paddleReady=true;
+}
+async function ocr(canvas,onProg){
+  await initPaddle(onProg);
+  onProg&&onProg(.5,'辨識中…');
+  const dataURL=canvas.toDataURL('image/png');
+  window.__ocrStage='執行辨識';const r=await window.Paddle.ocr(dataURL);window.__lastPaddleRaw=JSON.stringify(r).slice(0,3000);
+  onProg&&onProg(.95,'整理結果…');
+  // esearch-ocr 回傳 { line:[ {text, box:[[x,y],..4] }, ... ] }
+  const words=[];
+  const arr=(r&&(r.src||r.line||r.lines||r.results))||[];
+  for(const it of arr){
+    const t=(it.text||'').trim();if(!t)continue;
+    if(typeof it.mean==='number'&&it.mean<0.3)continue;   // 過濾極低信心雜訊
+    const box=it.box||it.points||it.bbox;
+    let x1,y1,x2,y2;
+    if(Array.isArray(box)&&Array.isArray(box[0])){
+      const xs=box.map(p=>p[0]),ys=box.map(p=>p[1]);
+      x1=Math.min(...xs);y1=Math.min(...ys);x2=Math.max(...xs);y2=Math.max(...ys);
+    }else if(box&&box.x!==undefined){x1=box.x;y1=box.y;x2=box.x+box.w;y2=box.y+box.h;}
+    else continue;
+    // PaddleOCR 一個 box 可能含整行多字(空格分隔) → 拆成 token, 依字數均分寬度估座標
+    const toks=t.split(/\s+/).filter(Boolean);
+    const tot=toks.reduce((n,s)=>n+s.length,0)||1;
+    let cx=x1;
+    for(const tk of toks){
+      const frac=tk.length/tot,ww=(x2-x1)*frac;
+      words.push({text:tk,x:Math.round(cx),y:Math.round(y1),w:Math.round(ww),h:Math.round(y2-y1)});
+      cx+=ww+(x2-x1)*(1/tot);   // 加一個字元寬的空隙
+    }
+  }
+  return words;
+}
+
+/* ========== 位置編號 ========== */
+function findPositions(words){
+  const pos=[];
+  for(const w of words){
+    if(/^(0[1-9]|1[0-3])$/.test(w.text)){
+      const nearR=words.some(o=>o!==w&&Math.abs(o.y-w.y)<w.h&&(o.x-(w.x+w.w))>0&&(o.x-(w.x+w.w))<w.h*2);
+      const nearL=words.some(o=>o!==w&&Math.abs(o.y-w.y)<w.h&&((w.x-(o.x+o.w))>0&&(w.x-(o.x+o.w))<w.h*2));
+      if(!nearR&&!nearL)pos.push({num:+w.text,x:w.x+w.w/2});   // 左右皆空=獨立編號; 批號尾碼左邊有07會被排除
+    }
+  }return pos;
+}
+function median(a){a=[...a].sort((x,y)=>x-y);const m=a.length>>1;
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;}
+function nearestPos(px,positions,W){
+  if(positions.length){
+    const byn={};for(const p of positions){(byn[p.num]=byn[p.num]||[]).push(p.x);}
+    let trusted={};for(const n in byn)if(byn[n].length>=2)trusted[n]=median(byn[n]);
+    if(!Object.keys(trusted).length)for(const n in byn)trusted[n]=median(byn[n]);
+    let best=null,bd=1e9;for(const n in trusted){const d=Math.abs(trusted[n]-px);if(d<bd){bd=d;best=+n;}}
+    return{num:best,src:'ocr'};
+  }
+  return{num:Math.max(1,Math.min(13,Math.round(px/W*13+0.5))),src:'estimated'};
+}
+
+/* ========== 膠帶色塊偵測 ========== */
+function detectPatches(srcCanvas){
+  const S=6,w=Math.floor(srcCanvas.width/S),h=Math.floor(srcCanvas.height/S);
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  c.getContext('2d').drawImage(srcCanvas,0,0,w,h);
+  const d=c.getContext('2d').getImageData(0,0,w,h).data;
+  const mask=new Uint8Array(w*h);
+  for(let i=0,p=0;i<d.length;i+=4,p++){const r=d[i],g=d[i+1],b=d[i+2];
+    if(r>110&&g>70&&b<140&&r-b>45&&r-g>15&&g-b>15)mask[p]=1;}
+  // 連通塊
+  const seen=new Uint8Array(w*h),boxes=[],minA=w*h*0.00015;
+  for(let p=0;p<w*h;p++){
+    if(mask[p]&&!seen[p]){
+      const st=[p];seen[p]=1;let x1=w,y1=h,x2=0,y2=0,n=0;
+      while(st.length){const q=st.pop();const qx=q%w,qy=(q/w)|0;n++;
+        if(qx<x1)x1=qx;if(qx>x2)x2=qx;if(qy<y1)y1=qy;if(qy>y2)y2=qy;
+        for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=qx+dx,ny=qy+dy;
+          if(nx>=0&&nx<w&&ny>=0&&ny<h){const np=ny*w+nx;if(mask[np]&&!seen[np]){seen[np]=1;st.push(np);}}}}
+      if(n>=minA)boxes.push([x1*S,y1*S,(x2+1)*S,(y2+1)*S]);
+    }
+  }return boxes;
+}
+
+/* ========== 規格模式 ========== */
+function specMode(words,product,grit,batch){
+  const cands=[];
+  const positions=findPositions(words);
+  const W=words.reduce((m,w)=>Math.max(m,w.x+w.w),0);
+  // 批號比對: 錨定中段 token(如 07), 只比對其後「尾碼區」— 顛倒信號全在尾碼
+  let anchorStr,tailStr;
+  if(/\s/.test(batch.trim())){
+    // 有空格: 用使用者的 token 邊界; 錨點=最長純數字 token
+    const bt=batch.trim().split(/\s+/);
+    let ai=0,best=-1;bt.forEach((t,i)=>{const sc=(/^\d+$/.test(t)?100:0)+t.length;if(sc>best){best=sc;ai=i;}});
+    anchorStr=bt[ai];tailStr=bt.slice(ai+1).join('');
+  }else{
+    // 無空格: 滑動 2~3 字元子串當錨點候選, 取「OCR 中該樣態出現最多次」者(頻率引導切分)
+    const s0=batch.trim();let bestCnt=-1;
+    for(const L of[2,3])for(let i=0;i<s0.length-L;i++){   // i<len-L 保證錨點後還有尾碼
+      const cand=s0.slice(i,i+L);if(!/^\d+$/.test(cand))continue;
+      const cn=norm(cand);
+      const cnt=words.reduce((n,w)=>n+(norm(w.text)===cn?1:0),0);
+      if(cnt>bestCnt){bestCnt=cnt;anchorStr=cand;tailStr=s0.slice(i+L);}
+    }
+    if(!anchorStr){anchorStr=s0.slice(0,-2);tailStr=s0.slice(-2);}
+  }
+  const anchorN=norm(anchorStr), tailN=norm(tailStr);
+  let batchOk=0;
+  const mism=[];const subForms={};
+  const seen=new Set();
+  for(const w of words){
+    if(norm(w.text)!==anchorN)continue;                    // 錨點須整token等於07
+    const key=((w.x/30)|0)+','+((w.y/30)|0);
+    if(seen.has(key))continue;seen.add(key);
+    const h=w.h;
+    // 錨點右側 4h 內的 tokens (由近到遠)
+    const right=words.filter(o=>o!==w&&Math.abs(o.y-w.y)<h*1.2
+      &&o.x>w.x&&(o.x-(w.x+w.w))<h*4).sort((a,b)=>a.x-b.x).slice(0,3);
+    if(!right.length)continue;
+    // 候選尾碼: r0, r0+r1, r1(跳過雜訊r0), r1+r2
+    const tails=[];
+    if(right[0])tails.push([right[0]]);
+    if(right[1]){tails.push([right[0],right[1]]);
+      if(right[0].text.length<=2)tails.push([right[1]]);   // 允許跳過一個<=2字元的雜訊
+      if(right[2]&&right[0].text.length<=2)tails.push([right[1],right[2]]);}
+    let verdict=null,vspan=null,vconcat='';
+    for(const span of tails){
+      const c=norm(span.map(t=>t.text).join(''));
+      if(c.length!==tailN.length)continue;
+      if(_eq(c,tailN)){verdict='ok';break;}
+      if(adjTransposed(c,tailN)){if(verdict!=='ok'){verdict='trans';vspan=span;vconcat=c;}continue;}
+      if(diff(c,tailN)===1&&!verdict){verdict='sub';vspan=span;vconcat=c;}
+    }
+    if(!verdict)continue;                                  // 尾碼區湊不出 = 非批號行
+    if(verdict==='ok'){batchOk++;continue;}
+    const span=[w,...vspan];
+    const x1=Math.min(...span.map(z=>z.x)),y1=Math.min(...span.map(z=>z.y)),
+          x2=Math.max(...span.map(z=>z.x+z.w)),y2=Math.max(...span.map(z=>z.y+z.h));
+    const found=span.map(z=>z.text).join(' ');
+    if(verdict==='trans'){
+      const p=nearestPos((x1+x2)/2,positions,W);
+      cands.push({type:'batch',found,bbox:[x1,y1,x2,y2],
+        pos:String(p.num).padStart(2,'0'),src:p.src,
+        note:`批號尾碼顛倒（讀到 ${vconcat.replace(/\?/g,'')} 序），應為 ${batch}`});
+    }else{
+      subForms[vconcat]=(subForms[vconcat]||0)+1;
+      mism.push({found,bbox:[x1,y1,x2,y2],key:vconcat});
+    }
+  }
+  const totalGroups=Math.max(1,batchOk+mism.length);
+  for(const mm of mism){
+    const ratio=subForms[mm.key]/totalGroups;
+    if(ratio>0.15||subForms[mm.key]<2)continue;
+    const p=nearestPos((mm.bbox[0]+mm.bbox[2])/2,positions,W);
+    cands.push({type:'text',found:mm.found,bbox:mm.bbox,
+      pos:String(p.num).padStart(2,'0'),src:p.src,
+      note:`批號尾碼疑異（讀到 ${mm.found}×${subForms[mm.key]}），需人眼確認字形`});
+  }
+  // 品名/粒號: 重複>=2次的一碼差才報
+  const bt=batch.trim().split(/\s+/);
+  const ctx=['MADE','IN','TAIWAN',product,grit,...bt];
+  for(const[label,target]of[['品名',product],['粒號',grit]]){
+    if(!target)continue;
+    const tn=norm(target),vocab=ctx.filter(v=>norm(v)!==tn).map(norm);
+    const hitForm={};
+    for(const w of words){const f=norm(w.text);
+      if(f!==tn&&diff(f,tn)===1&&vocab.every(c=>diff(f,c)>1))(hitForm[f]=hitForm[f]||[]).push(w);}
+    for(const f in hitForm){if(hitForm[f].length<2)continue;
+      for(const w of hitForm[f]){const p=nearestPos(w.x+w.w/2,positions,W);
+        cands.push({type:'text',found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
+          pos:String(p.num).padStart(2,'0'),src:p.src,note:`疑似${label}異常（×${hitForm[f].length}），應為 ${target}`});}}
+  }
+  // ★ 異型粒號混入偵測 (v0.5: 以「與本批粒號的字元差異」判別, 取代次數門檻)
+  //   差≥2碼 = 不可能是OCR誤讀, 是真的別種型號 → 即使1處也報(混料/混版是重大事故)
+  //   差 1碼 = 極可能是本批粒號的OCR誤讀(如150→180) → 需高頻+多處才報, 否則壓制
+  const gm=(grit||'').trim().match(/^P[-\s]?(\d{2,4})$/i);
+  if(gm){
+    const targetNum=gm[1];
+    const GRIT_RE=/^P[-\s]?(\d{2,4})$/i;
+    const KNOWN=new Set(['40','60','80','100','120','150','180','220','240','280','320','400','600','800']);
+    const charDiff=(a,b)=>{if(a.length!==b.length)return 9;let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d;};
+    const foreignForm={};
+    for(const w of words){
+      const t=w.text.trim().replace(/\s/g,'');
+      const mm=t.match(GRIT_RE);
+      if(!mm)continue;
+      const num=mm[1];
+      if(num===targetNum||!KNOWN.has(num))continue;
+      (foreignForm[num]=foreignForm[num]||[]).push(w);
+    }
+    for(const num in foreignForm){
+      const lst=foreignForm[num];
+      const diff=charDiff(num,targetNum);
+      let isForeign=false;
+      if(diff>=2&&diff<9){
+        isForeign=true;                       // 同位數差≥2碼: 確定是別型號, 1處就報
+      }else if(diff===1||diff===9){           // 差1碼 或 位數不同(殘缺): 疑OCR誤讀
+        // 差1碼: 疑OCR誤讀. 僅當 出現≥3次 且 集中在近似x欄(xspan<0.15,即成一直列) 才視為真混入
+        const xs=lst.map(w=>w.x);
+        const xspan=(Math.max(...xs)-Math.min(...xs))/W;
+        const need=(diff===9)?5:3;            // 殘缺型(位數不同)更可能是噪音, 門檻更高
+        isForeign=(lst.length>=need&&xspan<0.15);
+      }
+      if(!isForeign)continue;
+      const sev=diff>=2?'★':'⚠';
+      for(const w of lst){
+        const p=nearestPos(w.x+w.w/2,positions,W);
+        cands.push({type:'grit_foreign',found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
+          pos:String(p.num).padStart(2,'0'),src:p.src,diff,
+          note:`${sev}混入他型粒號 P-${num}（本批應為 ${grit}），共${lst.length}處`+
+               (diff>=2?'，型號完全不同，疑版輥混字':'，需人眼確認是否誤讀')});
+      }
+    }
+  }
+  return{cands,positions,batchOk,mode:'spec'};
+}
+
+/* ========== 自我比對模式 ========== */
+function autoMode(words){
+  const positions=findPositions(words);
+  const W=words.reduce((m,w)=>Math.max(m,w.x+w.w),0);
+  const posSet=new Set(positions.map(p=>Math.round(p.x)));
+  const inline=words.filter(w=>{
+    if(w.text.length<2)return false;
+    const clean=[...w.text].filter(c=>/[A-Z0-9-]/.test(c)).length/w.text.length;
+    if(clean<0.5)return false;
+    const h=w.h;
+    return words.some(o=>o!==w&&Math.abs(o.y-w.y)<h*1.3&&Math.abs(o.x-w.x)<h*8);
+  });
+  const freq={},byForm={};
+  for(const w of inline){const n=norm(w.text);freq[n]=(freq[n]||0)+1;(byForm[n]=byForm[n]||[]).push(w);}
+  const majors=Object.entries(freq).filter(([,c])=>c>=30);
+  const cands=[];
+  const sorted=Object.entries(freq).sort((a,b)=>a[1]-b[1]);
+  for(const[f,c]of sorted){
+    const eligible=majors.filter(([m,M])=>f!==m&&c*15<=M).sort((a,b)=>b[1]-a[1]);
+    // 顛倒類另用自適應門檻: 真版錯每版周重複一次(照片內約2-4次), 手機OCR多數計數偏低時 15x 過嚴
+    const eligT=majors.filter(([m,M])=>f!==m&&c<=Math.max(3,M/8)).sort((a,b)=>b[1]-a[1]);
+    let hit=null;
+    for(const[m,M]of eligT)if(adjTransposed(f,m)){hit=['transposition',m,M];break;}
+    if(!hit&&f.length>=4&&c>=2)for(const[m,M]of eligible)if(sub1(f,m)){hit=['substitution',m,M];break;}
+    if(hit&&hit[0]==='transposition'){
+      const pureDigit=x=>[...x].every(ch=>'0123456789'.includes(ch));
+      if(c<2&&!(pureDigit(f)&&pureDigit(hit[1])))hit=['transposition_weak',hit[1],hit[2]];
+    }
+    if(hit){const[kind,m,M]=hit,ref=byForm[m][0].text;
+      for(const w of byForm[f]){const p=nearestPos(w.x+w.w/2,positions,W);
+        cands.push({type:'outlier_'+kind,found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
+          pos:String(p.num).padStart(2,'0'),src:p.src,
+          note:`離群（${c}次）vs 多數 ${ref}（${M}次）· ${kind==='transposition'?'疑似字元顛倒':(kind==='transposition_weak'?'弱顛倒(單發)':'疑似照片誤讀')}`});}
+    }
+  }
+  const top=Object.entries(freq).sort((a,b)=>b[1]-a[1]).filter(([,c])=>c>=10)
+    .slice(0,12).map(([f,c])=>({pattern:byForm[f][0].text,count:c}));
+  return{cands,positions,majority:top,mode:'auto'};
+}
+
+/* ========== 去重（同樣態最多3框，清單合併計數） ========== */
+function dedupe(cands){
+  const groups={};
+  for(const c of cands){const k=c.type+'|'+norm(c.found);(groups[k]=groups[k]||[]).push(c);}
+  const kept=[];
+  for(const k in groups){const lst=groups[k];lst.forEach(c=>c.count=lst.length);
+    kept.push(...lst.slice(0,3));}
+  return kept;
+}
+
+/* ========== 繪製紅框標記 ========== */
+function drawResult(srcCanvas,defects){
+  const cv=document.getElementById('cv');
+  cv.width=srcCanvas.width;cv.height=srcCanvas.height;
+  const ctx=cv.getContext('2d');ctx.drawImage(srcCanvas,0,0);
+  const lw=Math.max(4,cv.width/500),fs=Math.max(28,cv.width/40);
+  ctx.lineWidth=lw;ctx.strokeStyle='#ff2018';ctx.font=`bold ${fs}px sans-serif`;
+  defects.forEach((c,i)=>{
+    const[x1,y1,x2,y2]=c.bbox,pad=Math.max(12,(y2-y1)/3);
+    ctx.strokeStyle='#ff2018';
+    ctx.strokeRect(x1-pad,y1-pad,(x2-x1)+pad*2,(y2-y1)+pad*2);
+    const r=Math.max(22,cv.width/55),cx=Math.max(r,x1-pad-r),cy=Math.max(r,y1-pad-r);
+    ctx.fillStyle='#ff2018';ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.fill();
+    ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(String(i+1),cx,cy);
+    ctx.fillStyle='#ff2018';ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText('POS '+c.pos,x1-pad,y2+pad+4);
+  });
+  return cv;
+}
+
+/* ========== 主流程 ========== */
+let lastCanvas=null,lastReport='';
+const $=id=>document.getElementById(id);
+function show(stage){['inputStage','stage','resultStage'].forEach(s=>$(s).style.display=s===stage?'block':'none');}
+function setProg(p,t){$('progBar').style.width=Math.round(p*100)+'%';if(t)$('progText').textContent=t;}
+
+['product','grit','batch'].forEach(k=>{
+  const v=localStorage.getItem('qc_'+k);if(v)$(k).value=v;
+  $(k).addEventListener('input',()=>localStorage.setItem('qc_'+k,$(k).value));
+});
+
+$('camBtn').onclick=()=>$('file').click();
+$('libBtn').onclick=()=>$('fileLib').click();
+$('file').onchange=e=>e.target.files[0]&&run(e.target.files[0]);
+$('fileLib').onchange=e=>e.target.files[0]&&run(e.target.files[0]);
+$('againBtn').onclick=()=>{show('inputStage');$('file').value='';$('fileLib').value='';};
+
+let pendingAuto=null;
+async function run(file){
+  show('stage');setProg(0,'讀取與轉正照片…');
+  try{
+    const src=await loadOriented(file);
+    // ★ 解析度守門: 原圖長邊 <1600px 幾乎確定是縮圖/截圖, OCR 會誤讀, 先警告
+    window.__srcLongEdge=src.__origLong||src.width;
+    setProg(.05,'影像前處理…');
+    const gray=toGrayCanvas(src);
+    setProg(.1,'文字辨識中…（首次需下載模型）');
+    const words=await ocr(gray,p=>setProg(.1+p*.8,'文字辨識中… '+Math.round(p*100)+'%'));
+    window.__lastOCR={words,W:src.width,H:src.height,mode:$('batch').value.trim()?'spec':'auto',
+      engine:'paddle',rawSample:(window.__lastPaddleRaw||'').toString().slice(0,2000),
+      spec:{p:$('product').value.trim(),g:$('grit').value.trim(),b:$('batch').value.trim()}};
+    setProg(.92,'比對分析…');
+    const product=$('product').value.trim(),grit=$('grit').value.trim(),batch=$('batch').value.trim();
+    let res;
+    if(batch)res=specMode(words,product,grit,batch);
+    else res={...autoMode(words),needConfirm:true};
+    // 膠帶偵測（兩模式皆做）
+    const W=src.width;
+    for(const bb of detectPatches(src)){
+      const p=nearestPos((bb[0]+bb[2])/2,res.positions,W);
+      res.cands.push({type:'foreign_patch',found:'黃褐色色塊',bbox:bb,
+        pos:String(p.num).padStart(2,'0'),src:p.src,note:'疑似接頭膠帶／修補貼紙，該段需剔除'});
+    }
+    res.cands=dedupe(res.cands);
+    if(res.needConfirm&&res.majority.length){
+      pendingAuto={res,src,product,grit,batch};
+      const spec=res.majority.slice(0,3).map(m=>m.pattern).join(' / ');
+      $('detectedSpec').textContent=spec;
+      $('confirmModal').style.display='flex';
+      return;
+    }
+    finish(res,src);
+  }catch(err){
+    show('inputStage');
+    alert('處理失敗（'+(window.__ocrStage||'未知階段')+'）：'+err.message+
+      '\n\n請截圖此訊息回報，以便修正。');
+    console.error('QC error @',window.__ocrStage,err);
+  }
+}
+
+$('specOk').onclick=()=>{$('confirmModal').style.display='none';
+  if(pendingAuto)finish(pendingAuto.res,pendingAuto.src);};
+$('specNo').onclick=()=>{$('confirmModal').style.display='none';show('inputStage');
+  $('batch').focus();pendingAuto=null;};
+
+function finish(res,src){
+  const defects=res.cands.filter(c=>c.type==='batch'||c.type==='foreign_patch'||c.type==='outlier_transposition'||c.type==='grit_foreign');
+  const suspects=res.cands.filter(c=>!defects.includes(c));
+  drawResult(src,defects);
+  lastCanvas=$('cv');
+  const box0=$('items');
+  if((window.__srcLongEdge||9999)<1600){
+    const warn=document.createElement('div');warn.className='item';
+    warn.style.borderLeftColor='#ff3b30';warn.style.background='rgba(255,59,48,.13)';
+    warn.innerHTML='🚫 <b>照片解析度過低（長邊僅 '+window.__srcLongEdge+'px）</b><br>'+
+      '這像是縮圖或截圖，OCR 會把字讀錯（例如把 P-240 誤判成 P-180），結果不可信。<br>'+
+      '<b>請改用「從相簿選圖」挑原始拍攝檔，或直接用相機拍</b>，長邊需 ≥2000px。';
+    box0.appendChild(warn);
+  }
+  // 判定
+  const v=$('verdict');const batchBad=defects.some(c=>c.type==='batch'||c.type==='outlier_transposition'||c.type==='grit_foreign');
+  const patch=defects.some(c=>c.type==='foreign_patch');
+  if(batchBad){v.className='verdict bad';
+    const gf=defects.find(c=>c.type==='grit_foreign');
+    v.textContent=gf?('❌ 不合格 — 混入他型粒號 '+gf.found):'❌ 不合格 — 批號異常需複判';}
+  else if(patch||defects.length){v.className='verdict warn';v.textContent='⚠️ 印刷本體乾淨，但有標記／異物段需剔除';}
+  else{v.className='verdict ok';v.textContent='✅ 快篩未發現異常';}
+  // 清單
+  const box=$('items');box.innerHTML='';
+  let lines=[v.textContent];
+  defects.forEach((c,i)=>{
+    const cnt=c.count>1?`<span class="tag">×${c.count}</span>`:'';
+    box.insertAdjacentHTML('beforeend',
+      `<div class="item"><span class="no">${i+1}</span><b>${c.found}</b>${cnt}
+       <span class="pos"> · POS ${c.pos}${c.src==='estimated'?'(估)':''}</span><br>${c.note}</div>`);
+    lines.push(`${i+1}. ${c.found} · 位置${c.pos} · ${c.note}`);
+  });
+  if(suspects.length){
+    box.insertAdjacentHTML('beforeend',
+      `<div class="item note">以下為疑似照片誤讀（皺褶／陰影／反光），非確定缺陷，建議近拍覆核：<br>`+
+      suspects.map(s=>`${s.found}（位置${s.pos}）`).join('、')+`</div>`);
+    lines.push('疑似誤讀：'+suspects.map(s=>s.found+'(位置'+s.pos+')').join('、'));
+  }
+  if(res.mode==='auto'&&res.majority.length){
+    lines.unshift('規格(自我比對)：'+res.majority.slice(0,3).map(m=>m.pattern).join(' / '));
+    const warn=document.createElement('div');warn.className='item note';
+    warn.style.borderLeftColor='#ffb020';
+    warn.innerHTML='⚠️ 自我比對模式對批號顛倒偵測較不可靠（OCR 可能把正常批號也讀錯而稀釋信號）。要確實檢查批號，請回上一頁填入批號改用規格模式。';
+    box.prepend(warn);
+  }
+  lastReport=lines.join('\n');
+  show('resultStage');
+}
+
+$('saveBtn').onclick=()=>{lastCanvas.toBlob(b=>{
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='QC標記_'+Date.now()+'.jpg';a.click();},'image/jpeg',.92);};
+$('dbgBtn').onclick=()=>{
+  if(!window.__lastOCR){alert('尚無資料，請先掃描一張');return;}
+  const blob=new Blob([JSON.stringify(window.__lastOCR)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='qc_debug_'+Date.now()+'.json';a.click();
+};
+$('copyBtn').onclick=async()=>{try{await navigator.clipboard.writeText(lastReport);
+  $('copyBtn').textContent='✓ 已複製';setTimeout(()=>$('copyBtn').textContent='📋 複製報告',1500);}
+  catch{alert(lastReport);}};
+</script>
+</body>
+</html>
