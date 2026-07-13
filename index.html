@@ -70,9 +70,32 @@
 <div id="inputStage">
   <div class="card">
     <label>品名 Product</label>
-    <input type="text" id="product" placeholder="例：C303" autocapitalize="characters">
+    <input type="text" id="product" placeholder="例：C303" autocapitalize="characters" list="productList">
+    <datalist id="productList">
+      <!-- 品名清單來源: TJS-75101-06 印刷附件圖 檔名 (2026-07) -->
+      <option>C299</option><option>C303</option><option>D306</option><option>J358</option>
+      <option>J878T</option><option>LDF32</option><option>RCA</option><option>RJA-87X</option>
+      <option>RJA82F</option><option>TB315</option><option>TC301</option><option>TE12</option>
+      <option>TE12A</option><option>TE313</option><option>TF31</option><option>TF32</option>
+      <option>TF32A</option><option>TF32BT</option><option>TF33</option><option>TF320</option>
+      <option>TF35LA</option><option>TH32</option><option>TJ10</option><option>TJ12</option>
+      <option>TJ121</option><option>TJ32</option><option>TJ32B</option><option>TJ362</option>
+      <option>TJ365</option><option>TJ369</option><option>TJ461</option><option>TJ539+</option>
+      <option>TJ569</option><option>TJ936</option><option>TL32</option><option>TR332</option>
+      <option>TR332A</option><option>TR332AX</option><option>TR332C</option><option>TR332H</option>
+      <option>TR332P</option><option>TR332PH</option><option>TR332W</option><option>TR333</option>
+      <option>TR62</option><option>TR62BT</option><option>TR666A</option><option>TR666TJA</option>
+      <option>TR871W</option><option>TS31W</option><option>TX359</option><option>TZ37</option>
+      <option>VG3C</option><option>X389</option>
+    </datalist>
     <label>粒號 Grit</label>
-    <input type="text" id="grit" placeholder="例：P-240" autocapitalize="characters">
+    <input type="text" id="grit" placeholder="例：P-240" autocapitalize="characters" list="gritList">
+    <datalist id="gritList">
+      <option>P-40</option><option>P-60</option><option>P-80</option><option>P-100</option>
+      <option>P-120</option><option>P-150</option><option>P-180</option><option>P-220</option>
+      <option>P-240</option><option>P-280</option><option>P-320</option><option>P-400</option>
+      <option>P-600</option><option>P-800</option>
+    </datalist>
     <label>批號 Batch（留空＝自我比對模式）</label>
     <input type="text" id="batch" placeholder="例：Q 07 0I" autocapitalize="characters">
     <div class="hint">注意易混字：大寫 I 不是數字 1、字母 O 不是數字 0。有無空格皆可比對。</div>
