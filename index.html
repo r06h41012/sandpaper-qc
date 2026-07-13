@@ -72,21 +72,22 @@
     <label>品名 Product</label>
     <input type="text" id="product" placeholder="例：C303" autocapitalize="characters" list="productList">
     <datalist id="productList">
-      <!-- 品名清單來源: TJS-75101-06 印刷附件圖 檔名 (2026-07) -->
-      <option>C299</option><option>C303</option><option>D306</option><option>J358</option>
-      <option>J878T</option><option>LDF32</option><option>RCA</option><option>RJA-87X</option>
-      <option>RJA82F</option><option>TB315</option><option>TC301</option><option>TE12</option>
-      <option>TE12A</option><option>TE313</option><option>TF31</option><option>TF32</option>
-      <option>TF32A</option><option>TF32BT</option><option>TF33</option><option>TF320</option>
-      <option>TF35LA</option><option>TH32</option><option>TJ10</option><option>TJ12</option>
-      <option>TJ121</option><option>TJ32</option><option>TJ32B</option><option>TJ362</option>
-      <option>TJ365</option><option>TJ369</option><option>TJ461</option><option>TJ539+</option>
-      <option>TJ569</option><option>TJ936</option><option>TL32</option><option>TR332</option>
-      <option>TR332A</option><option>TR332AX</option><option>TR332C</option><option>TR332H</option>
-      <option>TR332P</option><option>TR332PH</option><option>TR332W</option><option>TR333</option>
-      <option>TR62</option><option>TR62BT</option><option>TR666A</option><option>TR666TJA</option>
-      <option>TR871W</option><option>TS31W</option><option>TX359</option><option>TZ37</option>
-      <option>VG3C</option><option>X389</option>
+      <!-- 品名=實際印刷字樣, 來源: TJS-75101-06 印刷附件圖 DWG 內文 (2026-07)
+           注意: TR332A/AX 印 TR332; 變體尾字母(P/C/H/W/A)是獨立字元, 品名填基底型號
+           未確認(仍用檔名型號): TJ32B TJ121 TJ539+ TL32 TR332PH TR666TJA J878T RJA-87X RJA82F TF320 RCA -->
+      <option>BEAR</option><option>C299</option><option>C303</option><option>D-306</option>
+      <option>DOUBLE LINK</option><option>DOUBLE WHEEL</option><option>J358</option>
+      <option>J878T</option><option>LDF</option><option>LDF-32</option><option>RCA</option>
+      <option>RJA-87X</option><option>RJA82F</option><option>TB315</option><option>TC301</option>
+      <option>TD306</option><option>TE12</option><option>TE313</option><option>TF31</option>
+      <option>TF32</option><option>TF320</option><option>TF33</option><option>TF35</option>
+      <option>TH32</option><option>TJ10</option><option>TJ12</option><option>TJ121</option>
+      <option>TJ32</option><option>TJ32B</option><option>TJ362</option><option>TJ365</option>
+      <option>TJ369</option><option>TJ461</option><option>TJ539+</option><option>TJ569</option>
+      <option>TJ936</option><option>TL32</option><option>TPRA-EW</option><option>TR332</option>
+      <option>TR332PH</option><option>TR333</option><option>TR62</option><option>TR62BT</option>
+      <option>TR666</option><option>TR666TJA</option><option>TR871-W</option><option>TS31-W</option>
+      <option>TX359</option><option>TZ37</option><option>VG3C</option><option>X389</option>
     </datalist>
     <label>粒號 Grit</label>
     <input type="text" id="grit" placeholder="例：P-240" autocapitalize="characters" list="gritList">
@@ -94,7 +95,11 @@
       <option>P-40</option><option>P-60</option><option>P-80</option><option>P-100</option>
       <option>P-120</option><option>P-150</option><option>P-180</option><option>P-220</option>
       <option>P-240</option><option>P-280</option><option>P-320</option><option>P-400</option>
-      <option>P-600</option><option>P-800</option>
+      <option>P-500</option><option>P-600</option><option>P-800</option><option>P-1000</option>
+      <option>AA-80</option><option>AA-100</option><option>AA-120</option><option>AA-150</option>
+      <option>AA-320</option><option>AA-600</option>
+      <option>CC-100</option><option>CC-180</option><option>CC-240</option><option>CC-320</option>
+      <option>A180</option>
     </datalist>
     <label>批號 Batch（留空＝自我比對模式）</label>
     <input type="text" id="batch" placeholder="例：Q 07 0I" autocapitalize="characters">
@@ -407,49 +412,78 @@ function specMode(words,product,grit,batch){
           pos:String(p.num).padStart(2,'0'),src:p.src,note:`疑似${label}異常（×${hitForm[f].length}），應為 ${target}`});}}
   }
   // ★ 異型粒號混入偵測 (共用函式, 兩模式皆呼叫)
-  const gm=(grit||'').trim().match(/^P[-\s]?(\d{2,4})$/i);
-  if(gm)cands.push(...detectForeignGrit(words,gm[1],grit,positions,W));
+  const gm=(grit||'').trim().match(GRIT_RE);
+  if(gm)cands.push(...detectForeignGrit(words,{pre:gm[1].toUpperCase(),num:gm[2]},grit,positions,W));
   return{cands,positions,batchOk,mode:'spec'};
 }
 
-/* ========== 異型粒號混入偵測 (v0.5: 以「與本批粒號的字元差異」判別, 取代次數門檻) ==========
-   差≥2碼 = 不可能是OCR誤讀, 是真的別種型號 → 即使1處也報(混料/混版是重大事故)
-   差 1碼 = 極可能是本批粒號的OCR誤讀(如150→180) → 需高頻+多處才報, 否則壓制 */
-const GRIT_RE=/^P[-\s]?(\d{2,4})$/i;
-const KNOWN_GRITS=new Set(['40','60','80','100','120','150','180','220','240','280','320','400','600','800']);
-function detectForeignGrit(words,targetNum,gritLabel,positions,W){
+/* ========== 異型粒號混入偵測 (v0.6: 支援 P/AA/CC/A 全粒號系統) ==========
+   同系統 差≥2碼 = 不可能是OCR誤讀, 是真的別種型號 → 即使1處也報(混料/混版是重大事故)
+   同系統 差 1碼 = 極可能是本批粒號的OCR誤讀(如150→180) → 需高頻+多處才報, 否則壓制
+   不同系統(如P批出現AA) = 不同磨料產品線 → 視同差≥2碼, 1處就報 */
+const GRIT_RE=/^(P|AA|CC|A)[-\s]?(\d{2,4})$/i;
+const GRIT_PREF=/^(P|AA|CC)$/i;   // 單獨前綴+右鄰數字的分寫型(如「AA 320」); 單獨A是常見雜訊不列入
+const KNOWN_GRITS=new Set(['40','60','80','100','120','150','180','220','240','280','320','400','500','600','800','1000']);
+// 掃出全部粒號token: 連寫型(P-240/A180)或「前綴+數字」同行相鄰分寫型(AA 320/P 120)
+function gritTokens(words){
   const out=[];
-  const charDiff=(a,b)=>{if(a.length!==b.length)return 9;let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d;};
-  const foreignForm={};
   for(const w of words){
     const t=w.text.trim().replace(/\s/g,'');
     const mm=t.match(GRIT_RE);
-    if(!mm)continue;
-    const num=mm[1];
-    if(num===targetNum||!KNOWN_GRITS.has(num))continue;
-    (foreignForm[num]=foreignForm[num]||[]).push(w);
+    if(mm&&KNOWN_GRITS.has(mm[2])){
+      out.push({pre:mm[1].toUpperCase(),num:mm[2],x:w.x,
+        bbox:[w.x,w.y,w.x+w.w,w.y+w.h],label:w.text});continue;
+    }
+    if(GRIT_PREF.test(t)){
+      let best=null,bg=1e9;
+      for(const o of words){
+        if(o===w)continue;
+        if(Math.abs(o.y-w.y)>=w.h*0.7)continue;
+        if(o.x<=w.x)continue;
+        const gap=o.x-(w.x+w.w);
+        if(gap<-w.h*0.3||gap>w.h*2)continue;
+        if(gap<bg){bg=gap;best=o;}
+      }
+      if(best&&/^\d{2,4}$/.test(best.text)&&KNOWN_GRITS.has(best.text)){
+        out.push({pre:t.toUpperCase(),num:best.text,x:w.x,
+          bbox:[w.x,Math.min(w.y,best.y),best.x+best.w,Math.max(w.y+w.h,best.y+best.h)],
+          label:w.text+' '+best.text});
+      }
+    }
   }
-  for(const num in foreignForm){
-    const lst=foreignForm[num];
-    const diff=charDiff(num,targetNum);
+  return out;
+}
+function detectForeignGrit(words,target,gritLabel,positions,W){
+  const out=[];
+  const charDiff=(a,b)=>{if(a.length!==b.length)return 9;let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d;};
+  const foreignForm={};
+  for(const g of gritTokens(words)){
+    if(g.pre===target.pre&&g.num===target.num)continue;
+    const key=g.pre+'-'+g.num;
+    (foreignForm[key]=foreignForm[key]||[]).push(g);
+  }
+  for(const key in foreignForm){
+    const lst=foreignForm[key];
+    const pre=key.slice(0,key.indexOf('-')),num=key.slice(key.indexOf('-')+1);
+    const diff=(pre!==target.pre)?2:charDiff(num,target.num);   // 跨系統=確定外來
     let isForeign=false;
     if(diff>=2&&diff<9){
-      isForeign=true;                       // 同位數差≥2碼: 確定是別型號, 1處就報
-    }else if(diff===1||diff===9){           // 差1碼 或 位數不同(殘缺): 疑OCR誤讀
-      // 差1碼: 疑OCR誤讀. 僅當 出現≥3次 且 集中在近似x欄(xspan<0.15,即成一直列) 才視為真混入
-      const xs=lst.map(w=>w.x);
+      isForeign=true;                       // 差≥2碼或跨系統: 確定是別型號, 1處就報
+    }else if(diff===1||diff===9){           // 同系統差1碼 或 位數不同(殘缺): 疑OCR誤讀
+      // 僅當 出現≥3次 且 集中在近似x欄(xspan<0.15,即成一直列) 才視為真混入
+      const xs=lst.map(g=>g.x);
       const xspan=(Math.max(...xs)-Math.min(...xs))/W;
       const need=(diff===9)?5:3;            // 殘缺型(位數不同)更可能是噪音, 門檻更高
       isForeign=(lst.length>=need&&xspan<0.15);
     }
     if(!isForeign)continue;
     const sev=diff>=2?'★':'⚠';
-    for(const w of lst){
-      const p=nearestPos(w.x+w.w/2,positions,W);
-      out.push({type:'grit_foreign',found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
+    for(const g of lst){
+      const p=nearestPos((g.bbox[0]+g.bbox[2])/2,positions,W);
+      out.push({type:'grit_foreign',found:g.label,bbox:g.bbox,
         pos:String(p.num).padStart(2,'0'),src:p.src,diff,
-        note:`${sev}混入他型粒號 P-${num}（本批應為 ${gritLabel}），共${lst.length}處`+
-             (diff>=2?'，型號完全不同，疑版輥混字':'，需人眼確認是否誤讀')});
+        note:`${sev}混入他型粒號 ${key}（本批應為 ${gritLabel}），共${lst.length}處`+
+             (pre!==target.pre?'，不同粒號系統，疑版輥混字':(diff>=2?'，型號完全不同，疑版輥混字':'，需人眼確認是否誤讀'))});
     }
   }
   return out;
@@ -517,17 +551,18 @@ function autoMode(words){
           note:`離群（${members.length}次）vs 多數 ${ref}（${M}次）· ${kind==='transposition'?'疑似字元顛倒':(kind==='transposition_weak'?'弱顛倒(單發)':'疑似照片誤讀')}`});}
     }
   }
-  // ★ 異型粒號混入(自我比對版): 本批粒號從多數 P-xxx 樣態自動推斷,
+  // ★ 異型粒號混入(自我比對版): 本批粒號從多數粒號樣態自動推斷(P/AA/CC/A全系統),
   //   套用與規格模式完全相同的字元差異判別 (差≥2碼=真混入, 1處就報)
   const gcnt={},gLabel={};
-  for(const w of words){
-    const t=w.text.trim().replace(/\s/g,'');
-    const mm=t.match(GRIT_RE);
-    if(!mm||!KNOWN_GRITS.has(mm[1]))continue;
-    gcnt[mm[1]]=(gcnt[mm[1]]||0)+1;gLabel[mm[1]]=gLabel[mm[1]]||w.text;
+  for(const g of gritTokens(words)){
+    const k=g.pre+'-'+g.num;
+    gcnt[k]=(gcnt[k]||0)+1;gLabel[k]=gLabel[k]||g.label;
   }
   let gMaj=null,gC=0;for(const n in gcnt)if(gcnt[n]>gC){gC=gcnt[n];gMaj=n;}
-  if(gMaj&&gC>=10)cands.push(...detectForeignGrit(words,gMaj,gLabel[gMaj],positions,W));
+  if(gMaj&&gC>=10){
+    const tgt={pre:gMaj.slice(0,gMaj.indexOf('-')),num:gMaj.slice(gMaj.indexOf('-')+1)};
+    cands.push(...detectForeignGrit(words,tgt,gLabel[gMaj],positions,W));
+  }
   const top=Object.entries(freq).sort((a,b)=>b[1]-a[1]).filter(([,c])=>c>=10)
     .slice(0,12).map(([f,c])=>({pattern:byForm[f][0].text,count:c}));
   return{cands,positions,majority:top,mode:'auto'};
