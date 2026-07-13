@@ -361,49 +361,53 @@ function specMode(words,product,grit,batch){
         cands.push({type:'text',found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
           pos:String(p.num).padStart(2,'0'),src:p.src,note:`疑似${label}異常（×${hitForm[f].length}），應為 ${target}`});}}
   }
-  // ★ 異型粒號混入偵測 (v0.5: 以「與本批粒號的字元差異」判別, 取代次數門檻)
-  //   差≥2碼 = 不可能是OCR誤讀, 是真的別種型號 → 即使1處也報(混料/混版是重大事故)
-  //   差 1碼 = 極可能是本批粒號的OCR誤讀(如150→180) → 需高頻+多處才報, 否則壓制
+  // ★ 異型粒號混入偵測 (共用函式, 兩模式皆呼叫)
   const gm=(grit||'').trim().match(/^P[-\s]?(\d{2,4})$/i);
-  if(gm){
-    const targetNum=gm[1];
-    const GRIT_RE=/^P[-\s]?(\d{2,4})$/i;
-    const KNOWN=new Set(['40','60','80','100','120','150','180','220','240','280','320','400','600','800']);
-    const charDiff=(a,b)=>{if(a.length!==b.length)return 9;let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d;};
-    const foreignForm={};
-    for(const w of words){
-      const t=w.text.trim().replace(/\s/g,'');
-      const mm=t.match(GRIT_RE);
-      if(!mm)continue;
-      const num=mm[1];
-      if(num===targetNum||!KNOWN.has(num))continue;
-      (foreignForm[num]=foreignForm[num]||[]).push(w);
+  if(gm)cands.push(...detectForeignGrit(words,gm[1],grit,positions,W));
+  return{cands,positions,batchOk,mode:'spec'};
+}
+
+/* ========== 異型粒號混入偵測 (v0.5: 以「與本批粒號的字元差異」判別, 取代次數門檻) ==========
+   差≥2碼 = 不可能是OCR誤讀, 是真的別種型號 → 即使1處也報(混料/混版是重大事故)
+   差 1碼 = 極可能是本批粒號的OCR誤讀(如150→180) → 需高頻+多處才報, 否則壓制 */
+const GRIT_RE=/^P[-\s]?(\d{2,4})$/i;
+const KNOWN_GRITS=new Set(['40','60','80','100','120','150','180','220','240','280','320','400','600','800']);
+function detectForeignGrit(words,targetNum,gritLabel,positions,W){
+  const out=[];
+  const charDiff=(a,b)=>{if(a.length!==b.length)return 9;let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d;};
+  const foreignForm={};
+  for(const w of words){
+    const t=w.text.trim().replace(/\s/g,'');
+    const mm=t.match(GRIT_RE);
+    if(!mm)continue;
+    const num=mm[1];
+    if(num===targetNum||!KNOWN_GRITS.has(num))continue;
+    (foreignForm[num]=foreignForm[num]||[]).push(w);
+  }
+  for(const num in foreignForm){
+    const lst=foreignForm[num];
+    const diff=charDiff(num,targetNum);
+    let isForeign=false;
+    if(diff>=2&&diff<9){
+      isForeign=true;                       // 同位數差≥2碼: 確定是別型號, 1處就報
+    }else if(diff===1||diff===9){           // 差1碼 或 位數不同(殘缺): 疑OCR誤讀
+      // 差1碼: 疑OCR誤讀. 僅當 出現≥3次 且 集中在近似x欄(xspan<0.15,即成一直列) 才視為真混入
+      const xs=lst.map(w=>w.x);
+      const xspan=(Math.max(...xs)-Math.min(...xs))/W;
+      const need=(diff===9)?5:3;            // 殘缺型(位數不同)更可能是噪音, 門檻更高
+      isForeign=(lst.length>=need&&xspan<0.15);
     }
-    for(const num in foreignForm){
-      const lst=foreignForm[num];
-      const diff=charDiff(num,targetNum);
-      let isForeign=false;
-      if(diff>=2&&diff<9){
-        isForeign=true;                       // 同位數差≥2碼: 確定是別型號, 1處就報
-      }else if(diff===1||diff===9){           // 差1碼 或 位數不同(殘缺): 疑OCR誤讀
-        // 差1碼: 疑OCR誤讀. 僅當 出現≥3次 且 集中在近似x欄(xspan<0.15,即成一直列) 才視為真混入
-        const xs=lst.map(w=>w.x);
-        const xspan=(Math.max(...xs)-Math.min(...xs))/W;
-        const need=(diff===9)?5:3;            // 殘缺型(位數不同)更可能是噪音, 門檻更高
-        isForeign=(lst.length>=need&&xspan<0.15);
-      }
-      if(!isForeign)continue;
-      const sev=diff>=2?'★':'⚠';
-      for(const w of lst){
-        const p=nearestPos(w.x+w.w/2,positions,W);
-        cands.push({type:'grit_foreign',found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
-          pos:String(p.num).padStart(2,'0'),src:p.src,diff,
-          note:`${sev}混入他型粒號 P-${num}（本批應為 ${grit}），共${lst.length}處`+
-               (diff>=2?'，型號完全不同，疑版輥混字':'，需人眼確認是否誤讀')});
-      }
+    if(!isForeign)continue;
+    const sev=diff>=2?'★':'⚠';
+    for(const w of lst){
+      const p=nearestPos(w.x+w.w/2,positions,W);
+      out.push({type:'grit_foreign',found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
+        pos:String(p.num).padStart(2,'0'),src:p.src,diff,
+        note:`${sev}混入他型粒號 P-${num}（本批應為 ${gritLabel}），共${lst.length}處`+
+             (diff>=2?'，型號完全不同，疑版輥混字':'，需人眼確認是否誤讀')});
     }
   }
-  return{cands,positions,batchOk,mode:'spec'};
+  return out;
 }
 
 /* ========== 自我比對模式 ========== */
@@ -468,6 +472,17 @@ function autoMode(words){
           note:`離群（${members.length}次）vs 多數 ${ref}（${M}次）· ${kind==='transposition'?'疑似字元顛倒':(kind==='transposition_weak'?'弱顛倒(單發)':'疑似照片誤讀')}`});}
     }
   }
+  // ★ 異型粒號混入(自我比對版): 本批粒號從多數 P-xxx 樣態自動推斷,
+  //   套用與規格模式完全相同的字元差異判別 (差≥2碼=真混入, 1處就報)
+  const gcnt={},gLabel={};
+  for(const w of words){
+    const t=w.text.trim().replace(/\s/g,'');
+    const mm=t.match(GRIT_RE);
+    if(!mm||!KNOWN_GRITS.has(mm[1]))continue;
+    gcnt[mm[1]]=(gcnt[mm[1]]||0)+1;gLabel[mm[1]]=gLabel[mm[1]]||w.text;
+  }
+  let gMaj=null,gC=0;for(const n in gcnt)if(gcnt[n]>gC){gC=gcnt[n];gMaj=n;}
+  if(gMaj&&gC>=10)cands.push(...detectForeignGrit(words,gMaj,gLabel[gMaj],positions,W));
   const top=Object.entries(freq).sort((a,b)=>b[1]-a[1]).filter(([,c])=>c>=10)
     .slice(0,12).map(([f,c])=>({pattern:byForm[f][0].text,count:c}));
   return{cands,positions,majority:top,mode:'auto'};
