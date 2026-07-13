@@ -407,7 +407,7 @@ function specMode(words,product,grit,batch){
 }
 
 /* ========== 自我比對模式 ========== */
-// 找 w 的同行左鄰 token: y差<h*0.6(嚴, 避免抓到上一行), 間距 -0.3h~2.5h 取最近
+// 找 w 的同行左鄰 token(回傳token物件): y差<h*0.6(嚴, 避免抓到上一行), 間距 -0.3h~2.5h 取最近
 function leftAnchor(words,w){let best=null,bg=1e9;
   for(const o of words){if(o===w)continue;
     if(Math.abs(o.y-w.y)>=w.h*0.6)continue;
@@ -415,10 +415,10 @@ function leftAnchor(words,w){let best=null,bg=1e9;
     const gap=w.x-(o.x+o.w);
     if(gap<-w.h*0.3||gap>w.h*2.5)continue;
     if(gap<bg){bg=gap;best=o;}}
-  return best?norm(best.text):null;}
+  return best;}
 // 多數樣態成員的主流左鄰(共識>=40%才回傳, 如批號尾碼的左鄰=07)
 function majorityAnchor(words,members){const cnt={};
-  for(const m of members){const a=leftAnchor(words,m);if(a)cnt[a]=(cnt[a]||0)+1;}
+  for(const m of members){const a=leftAnchor(words,m);if(a){const n=norm(a.text);cnt[n]=(cnt[n]||0)+1;}}
   let best=null,bc=0;
   for(const k in cnt)if(cnt[k]>bc){bc=cnt[k];best=k;}
   return(best&&bc>=members.length*0.4)?best:null;}
@@ -450,15 +450,20 @@ function autoMode(words){
       if(c<2&&!(pureDigit(f)&&pureDigit(hit[1])))hit=['transposition_weak',hit[1],hit[2]];
     }
     if(hit){const[kind,m,M]=hit,ref=byForm[m][0].text;
-      let members=byForm[f];
+      let members=byForm[f].map(w=>({w,a:null}));
       // ★ 顛倒類需上下文一致: 多數樣態左鄰若有共識(批號尾碼左鄰=07),
       //   候選左鄰必須相同 — 排除版面位置編號10被當成0I顛倒的誤報
       if(kind==='transposition'||kind==='transposition_weak'){
         const anc=majorityAnchor(words,byForm[m]);
-        if(anc)members=members.filter(w=>leftAnchor(words,w)===anc);
+        if(anc)members=members.filter(mb=>{mb.a=leftAnchor(words,mb.w);
+          return mb.a&&norm(mb.a.text)===anc;});
       }
-      for(const w of members){const p=nearestPos(w.x+w.w/2,positions,W);
-        cands.push({type:'outlier_'+kind,found:w.text,bbox:[w.x,w.y,w.x+w.w,w.y+w.h],
+      for(const{w,a}of members){
+        // 框含錨點: token x 是整行框均分的估值, 單框易偏; 連錨點一起框左緣落在實框邊界
+        const x1=a?Math.min(a.x,w.x):w.x, y1=a?Math.min(a.y,w.y):w.y,
+              x2=a?Math.max(a.x+a.w,w.x+w.w):w.x+w.w, y2=a?Math.max(a.y+a.h,w.y+w.h):w.y+w.h;
+        const p=nearestPos((x1+x2)/2,positions,W);
+        cands.push({type:'outlier_'+kind,found:(a?a.text+' ':'')+w.text,bbox:[x1,y1,x2,y2],
           pos:String(p.num).padStart(2,'0'),src:p.src,
           note:`離群（${members.length}次）vs 多數 ${ref}（${M}次）· ${kind==='transposition'?'疑似字元顛倒':(kind==='transposition_weak'?'弱顛倒(單發)':'疑似照片誤讀')}`});}
     }
