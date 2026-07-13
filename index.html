@@ -176,28 +176,50 @@ let __paddleReady=false;
 const MODEL_BASE='https://cdn.jsdelivr.net/npm/paddleocr-browser/dist/';
 async function waitFor(cond,ms=30000){const t0=Date.now();
   while(!cond()){if(Date.now()-t0>ms)throw new Error('載入逾時');await new Promise(r=>setTimeout(r,120));}}
+// 漸進假進度: 長時間無回呼的階段(模型下載/推論)讓進度條緩慢爬向 to, 完成後由呼叫端 clearInterval
+function startTrickle(from,to,onProg){let p=from;
+  return setInterval(()=>{p+=(to-p)*0.05;onProg&&onProg(p);},300);}
 async function initPaddle(onProg){
   if(__paddleReady)return;
   onProg&&onProg(0,'載入辨識引擎…');
   window.__ocrStage='載入OCR模組';await waitFor(()=>window.__paddleModuleReady&&window.Paddle);       // esearch 模組
   window.__ocrStage='載入OpenCV';await waitFor(()=>window.cv&&window.cv.Mat);                        // opencv.js
   window.__ocrStage='載入ONNX';await waitFor(()=>window.ort);                                      // onnxruntime-web
+  // ★ 推論移到 Web Worker: 主執行緒不被 wasm 卡死, 頁面不再「無回應」、進度條動得了
+  try{if(window.Worker&&window.ort.env&&window.ort.env.wasm)window.ort.env.wasm.proxy=true;}catch(e){}
   onProg&&onProg(.3,'下載模型檔（首次較久）…');
   window.__ocrStage='下載模型';const dic=await (await fetch(MODEL_BASE+'ppocr_keys_v1.txt')).text();
-  await window.Paddle.init({
+  const cfg={
     detPath:MODEL_BASE+'ppocr_det.onnx',
     recPath:MODEL_BASE+'ppocr_rec.onnx',
     dic, ort:window.ort, node:false, cv:window.cv,
-    // 密集小字場景: 降低偵測門檻讓更多字框被抓到
     detConfig:{}, recConfig:{}
-  });
+  };
+  const t=startTrickle(.3,.48,onProg);
+  try{await window.Paddle.init(cfg);}
+  catch(e){ // worker 版初始化失敗(部分舊機型) → 回退主執行緒
+    if(window.ort.env&&window.ort.env.wasm&&window.ort.env.wasm.proxy){
+      window.ort.env.wasm.proxy=false;await window.Paddle.init(cfg);
+    }else throw e;
+  }finally{clearInterval(t);}
   window.__ocrStage='引擎就緒';__paddleReady=true;
 }
 async function ocr(canvas,onProg){
   await initPaddle(onProg);
   onProg&&onProg(.5,'辨識中…');
   const dataURL=canvas.toDataURL('image/png');
-  window.__ocrStage='執行辨識';const r=await window.Paddle.ocr(dataURL);window.__lastPaddleRaw=JSON.stringify(r).slice(0,3000);
+  window.__ocrStage='執行辨識';
+  const t=startTrickle(.5,.93,onProg);
+  let r;
+  try{r=await window.Paddle.ocr(dataURL);}
+  catch(err){ // worker 版推論失敗 → 回退主執行緒重新初始化再試一次
+    if(window.ort.env&&window.ort.env.wasm&&window.ort.env.wasm.proxy){
+      window.ort.env.wasm.proxy=false;__paddleReady=false;
+      await initPaddle(onProg);
+      r=await window.Paddle.ocr(dataURL);
+    }else throw err;
+  }finally{clearInterval(t);}
+  window.__lastPaddleRaw=JSON.stringify(r).slice(0,3000);
   onProg&&onProg(.95,'整理結果…');
   // esearch-ocr 回傳 { line:[ {text, box:[[x,y],..4] }, ... ] }
   const words=[];
