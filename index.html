@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>QC快篩 · 砂布背印</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12161c">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 <script async src="https://docs.opencv.org/4.8.0/opencv.js"></script>
 <script type="module">
@@ -725,6 +730,9 @@ $('dbgBtn').onclick=()=>{
 $('copyBtn').onclick=async()=>{try{await navigator.clipboard.writeText(lastReport);
   $('copyBtn').textContent='✓ 已複製';setTimeout(()=>$('copyBtn').textContent='📋 複製報告',1500);}
   catch{alert(lastReport);}};
+
+/* ========== PWA 離線化: 註冊 Service Worker (CDN模型快取, 產線無網可用) ========== */
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script>
 </body>
 </html>

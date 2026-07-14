@@ -1,0 +1,15 @@
+{
+  "name": "QC快篩 · 砂布背印",
+  "short_name": "QC快篩",
+  "description": "研磨砂布背面連續滾筒印刷品管快篩（本地OCR，照片不上傳）",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#12161c",
+  "theme_color": "#12161c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
