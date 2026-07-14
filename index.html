@@ -304,28 +304,7 @@ function nearestPos(px,positions,W){
   return{num:Math.max(1,Math.min(13,Math.round(px/W*13+0.5))),src:'estimated'};
 }
 
-/* ========== 膠帶色塊偵測 ========== */
-function detectPatches(srcCanvas){
-  const S=6,w=Math.floor(srcCanvas.width/S),h=Math.floor(srcCanvas.height/S);
-  const c=document.createElement('canvas');c.width=w;c.height=h;
-  c.getContext('2d').drawImage(srcCanvas,0,0,w,h);
-  const d=c.getContext('2d').getImageData(0,0,w,h).data;
-  const mask=new Uint8Array(w*h);
-  for(let i=0,p=0;i<d.length;i+=4,p++){const r=d[i],g=d[i+1],b=d[i+2];
-    if(r>110&&g>70&&b<140&&r-b>45&&r-g>15&&g-b>15)mask[p]=1;}
-  // 連通塊
-  const seen=new Uint8Array(w*h),boxes=[],minA=w*h*0.00015;
-  for(let p=0;p<w*h;p++){
-    if(mask[p]&&!seen[p]){
-      const st=[p];seen[p]=1;let x1=w,y1=h,x2=0,y2=0,n=0;
-      while(st.length){const q=st.pop();const qx=q%w,qy=(q/w)|0;n++;
-        if(qx<x1)x1=qx;if(qx>x2)x2=qx;if(qy<y1)y1=qy;if(qy>y2)y2=qy;
-        for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=qx+dx,ny=qy+dy;
-          if(nx>=0&&nx<w&&ny>=0&&ny<h){const np=ny*w+nx;if(mask[np]&&!seen[np]){seen[np]=1;st.push(np);}}}}
-      if(n>=minA)boxes.push([x1*S,y1*S,(x2+1)*S,(y2+1)*S]);
-    }
-  }return boxes;
-}
+/* 膠帶色塊偵測已移除(2026-07): 褐色膠帶/貼紙來自廢料對版測試, 屬正常現象非缺陷 */
 
 /* ========== 規格模式 ========== */
 function specMode(words,product,grit,batch){
@@ -640,13 +619,6 @@ async function run(file){
     let res;
     if(batch)res=specMode(words,product,grit,batch);
     else res={...autoMode(words),needConfirm:true};
-    // 膠帶偵測（兩模式皆做）
-    const W=src.width;
-    for(const bb of detectPatches(src)){
-      const p=nearestPos((bb[0]+bb[2])/2,res.positions,W);
-      res.cands.push({type:'foreign_patch',found:'黃褐色色塊',bbox:bb,
-        pos:String(p.num).padStart(2,'0'),src:p.src,note:'疑似接頭膠帶／修補貼紙，該段需剔除'});
-    }
     res.cands=dedupe(res.cands);
     if(res.needConfirm&&res.majority.length){
       pendingAuto={res,src,product,grit,batch};
@@ -670,7 +642,7 @@ $('specNo').onclick=()=>{$('confirmModal').style.display='none';show('inputStage
   $('batch').focus();pendingAuto=null;};
 
 function finish(res,src){
-  const defects=res.cands.filter(c=>c.type==='batch'||c.type==='foreign_patch'||c.type==='outlier_transposition'||c.type==='grit_foreign');
+  const defects=res.cands.filter(c=>c.type==='batch'||c.type==='outlier_transposition'||c.type==='grit_foreign');
   const suspects=res.cands.filter(c=>!defects.includes(c));
   drawResult(src,defects);
   lastCanvas=$('cv');
@@ -684,12 +656,10 @@ function finish(res,src){
     box0.appendChild(warn);
   }
   // 判定
-  const v=$('verdict');const batchBad=defects.some(c=>c.type==='batch'||c.type==='outlier_transposition'||c.type==='grit_foreign');
-  const patch=defects.some(c=>c.type==='foreign_patch');
-  if(batchBad){v.className='verdict bad';
+  const v=$('verdict');
+  if(defects.length){v.className='verdict bad';
     const gf=defects.find(c=>c.type==='grit_foreign');
     v.textContent=gf?('❌ 不合格 — 混入他型粒號 '+gf.found):'❌ 不合格 — 批號異常需複判';}
-  else if(patch||defects.length){v.className='verdict warn';v.textContent='⚠️ 印刷本體乾淨，但有標記／異物段需剔除';}
   else{v.className='verdict ok';v.textContent='✅ 快篩未發現異常';}
   // 清單
   const box=$('items');box.innerHTML='';
